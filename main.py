@@ -1,36 +1,84 @@
-from datetime import datetime
 import os
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+from typing import List
+from simpleeval import simple_eval, InvalidExpression
 
 load_dotenv()
-
 TOKEN = os.getenv("DISCORD_TOKEN")
+
+if not TOKEN:
+    raise ValueError("DISCORD_TOKEN není nastaven v prostředí!")
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+MATH_SYMBOLS = ['+', '-', '*', '/']
+NUMBERS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+
+async def number_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    """Autocomplete pro čísla a matematické operátory"""
+    choices = []
+    
+    # Pomocná funkce pro bezpečné přidávání do limitu 25 prvků
+    def add_choices(source_list: list):
+        for item in source_list:
+            if len(choices) >= 25:
+                break
+            val = f"{current}{item}"
+            # Discord vyžaduje, aby jméno i hodnota měly max 100 znaků
+            if len(val) <= 100:
+                choices.append(app_commands.Choice(name=val, value=val))
+
+    # Logika pro našeptávání
+    if current == '':
+        add_choices(NUMBERS)
+    elif current[-1] in MATH_SYMBOLS:
+        add_choices(NUMBERS)
+    else:
+        # Pokud uživatel zrovna píše číslo, nabídneme operátory i další čísla
+        add_choices(MATH_SYMBOLS)
+        add_choices(NUMBERS)
+
+    # Filtrace: Ukážeme jen ty možnosti, které odpovídají aktuálnímu vstupu
+    # (Discord si s tím umí poradit, ale je lepší posílat relevantní data)
+    return [c for c in choices if current in c.name][:25]
+
+
+@bot.tree.command(name="equation", description="Solve a math equation")
+@app_commands.describe(equation="The math equation to solve (e.g., 5 + 3 * 2)")
+@app_commands.autocomplete(equation=number_autocomplete)
+async def equation_command(interaction: discord.Interaction, equation: str):
+    # Okamžitě odpovíme/odložíme odpověď, aby Discord nevypršel (timeout 3s)
+    await interaction.response.defer()
+    
+    try:
+        # Vyhodnocení výrazu
+        result = simple_eval(equation)
+        text = f"**Solve equation:** `{equation} = {result}`"
+    except InvalidExpression:
+        text = f"❌ Invalid mathematical expression: `{equation}`. Check the syntax."
+    except ZeroDivisionError:
+        text = f"❌ Error: Division by zero in expression `{equation}`."
+    except Exception as e:
+        text = f"❌ Unexpected calculation error."
+
+    # Odeslání výsledné zprávy (použijeme followup, protože jsme dali defer)
+    await interaction.followup.send(text)
+
 @bot.event
 async def on_ready():
-    print(f"{bot.user.name} je online a připraven!")
+    print(f"{bot.user.name} je online!")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synchronizováno {len(synced)} slash příkazů.")
+    except Exception as e:
+        print(f"Chyba při synchronizaci: {e}")
 
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-
-    if message.content.lower() == "ahoj":
-        await message.channel.send(f"čau {message.author.mention}!")
-    
-    if message.content.lower() == "time":
-        now_time = datetime.now()
-        now_time_str = f'{now_time.hour}h {now_time.minute}m {now_time.second}s'
-        await message.channel.send(f"Aktualne je {now_time_str}!")
-
-
-    await bot.process_commands(message)
+# Řádek s duplicitní registrací autocomplete byl smazán
 
 bot.run(TOKEN)
