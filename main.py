@@ -1,3 +1,4 @@
+import asyncio
 import os
 import discord
 from discord import app_commands
@@ -48,27 +49,28 @@ async def number_autocomplete(interaction: discord.Interaction, current: str) ->
     # (Discord si s tím umí poradit, ale je lepší posílat relevantní data)
     return [c for c in choices if current in c.name][:25]
 
-
 @bot.tree.command(name="equation", description="Solve a math equation")
 @app_commands.describe(equation="The math equation to solve (e.g., 5 + 3 * 2)")
 @app_commands.autocomplete(equation=number_autocomplete)
 async def equation_command(interaction: discord.Interaction, equation: str):
     # Okamžitě odpovíme/odložíme odpověď, aby Discord nevypršel (timeout 3s)
     await interaction.response.defer()
-    
-    try:
-        # Vyhodnocení výrazu
-        result = simple_eval(equation)
-        text = f"**Solve equation:** `{equation} = {result}`"
-    except InvalidExpression:
-        text = f"❌ Invalid mathematical expression: `{equation}`. Check the syntax."
-    except ZeroDivisionError:
-        text = f"❌ Error: Division by zero in expression `{equation}`."
-    except Exception as e:
-        text = f"❌ Unexpected calculation error."
 
-    # Odeslání výsledné zprávy (použijeme followup, protože jsme dali defer)
-    await interaction.followup.send(text)
+    def eval_responce(equation=equation):
+        try:
+            if len(equation) > 100: return '❌ Equation is too long'
+            result = simple_eval(equation)
+            text = f"**Solve equation:** `{equation} = {result}`"
+            if len(text) > 2000: return '❌ Response is too long'
+        except InvalidExpression:
+            text = f"❌ Invalid mathematical expression: `{equation}`. Check the syntax."
+        except ZeroDivisionError:
+            text = f"❌ Error: Division by zero in expression `{equation}`."
+        except Exception as e:
+            text = f"❌ Unexpected calculation error. {e}"
+        return text
+
+    await interaction.followup.send(eval_responce())
 
 @bot.event
 async def on_ready():
